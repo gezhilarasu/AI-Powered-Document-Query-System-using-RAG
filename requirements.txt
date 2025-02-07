@@ -8,5 +8,5 @@ langchain
 generativeai
 spacy
 google-generativeai
-
+summa
 
