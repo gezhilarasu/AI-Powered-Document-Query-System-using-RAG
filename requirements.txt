@@ -7,4 +7,6 @@ python-dotenv
 langchain
 generativeai
 spacy
+google-generativeai
+
 
