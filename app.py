@@ -14,8 +14,14 @@ from io import BytesIO
 # Load API Key from Streamlit Secrets
 genai.configure(api_key=st.secrets["api_key"])
 
-# Load NLP model and Embedding Model
-nlp = spacy.load("en_core_web_sm")
+# Load NLP model and Embedding Model (with error handling)
+try:
+    nlp = spacy.load("en_core_web_sm")
+except OSError:
+    st.error("⚠️ Spacy model 'en_core_web_sm' not found! Installing now...")
+    os.system("python -m spacy download en_core_web_sm")
+    nlp = spacy.load("en_core_web_sm")
+
 embedding_model = SentenceTransformer("multi-qa-MiniLM-L6-cos-v1")
 
 def pdf_read(file):
@@ -24,19 +30,19 @@ def pdf_read(file):
     pdf_reader = PdfReader(file)
     for page in pdf_reader.pages:
         text += page.extract_text() or ""
-    return text
+    return text.strip()
 
 def clean_text(text):
     """Removes noise and unwanted characters."""
-    text = re.sub(r'[^\x00-\x7F]+', ' ', text)  
-    text = re.sub(r'\s+', ' ', text).strip()  
+    text = re.sub(r'[^\x00-\x7F]+', ' ', text)  # Remove non-ASCII characters
+    text = re.sub(r'\s+', ' ', text).strip()  # Normalize spaces
     return text
 
 def summarize_text(text):
     """Summarizes text using TextRank."""
     return summarizer.summarize(text, ratio=0.3)
 
-def get_chunk(text, chunk_size=500, chunk_overlap=100):
+def get_chunks(text, chunk_size=500, chunk_overlap=100):
     """Splits text into chunks for retrieval."""
     splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
     return splitter.split_text(text)
@@ -46,7 +52,7 @@ def highlight_text(text, query):
     words = query.split()
     for word in words:
         text = re.sub(f"(?i)({word})", r"**\1**", text)
-    sentences = re.split(r'(?<=[.!?])\s+', text)  
+    sentences = re.split(r'(?<=[.!?])\s+', text)  # Split into sentences
     return "\n".join([f"- {sentence.strip()}" for sentence in sentences if sentence.strip()])
 
 def query_faiss_index(query, model, index, chunks, top_k=5):
@@ -83,28 +89,32 @@ if uploaded_file:
     raw_text = pdf_read(BytesIO(uploaded_file.read()))
     cleaned_text = clean_text(raw_text)
     summarized_text = summarize_text(cleaned_text)
-    chunks = get_chunk(summarized_text)
-    
-    # Create FAISS index if not already done
-    if "faiss_index" not in st.session_state:
-        chunk_embeddings = embedding_model.encode(chunks).astype("float32")
-        dimension = chunk_embeddings.shape[1]
-        index = faiss.IndexFlatL2(dimension)
-        index.add(chunk_embeddings)
-        st.session_state.faiss_index = index
-        st.session_state.chunks = chunks
-    
+    chunks = get_chunks(summarized_text)
+
+    # Create FAISS index for new PDFs
+    chunk_embeddings = embedding_model.encode(chunks).astype("float32")
+    dimension = chunk_embeddings.shape[1]
+    index = faiss.IndexFlatL2(dimension)
+    index.add(chunk_embeddings)
+
+    # Store index and chunks in session state
+    st.session_state["faiss_index"] = index
+    st.session_state["chunks"] = chunks
+
     query = st.text_input("💡 Ask a question related to the PDF:")
+    
     if query:
         st.write(f"🔍 Searching for: **{query}**")
-        results = query_faiss_index(query.lower(), embedding_model, st.session_state.faiss_index, st.session_state.chunks)
+        results = query_faiss_index(query.lower(), embedding_model, st.session_state["faiss_index"], st.session_state["chunks"])
         response = generate_response(query, results)
+
         st.markdown(f"""
         <div style="border: 2px solid #4CAF50; padding: 10px; border-radius: 10px; background-color: #f9f9f9;">
             <h4 style="color: #333;">📝 Generated Answer:</h4>
             <p style="font-size: 16px; color: #000;">{response}</p>
         </div>
         """, unsafe_allow_html=True)
+
         st.write("📌 **Top matching results from the PDF:**")
         for i, (chunk, _) in enumerate(results):
             st.write(f"{i+1}. {highlight_text(chunk, query)}")
