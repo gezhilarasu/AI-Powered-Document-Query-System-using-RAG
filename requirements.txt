@@ -9,4 +9,4 @@ generativeai
 spacy
 google-generativeai
 summa
-en-core-web-sm
+

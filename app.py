@@ -9,20 +9,26 @@ from sentence_transformers import SentenceTransformer
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from summa import summarizer  
 import os
+import subprocess
+import sys
 from io import BytesIO
+
+# Function to install Spacy model if not available
+def install_spacy_model():
+    try:
+        nlp = spacy.load("en_core_web_sm")
+    except OSError:
+        st.warning("⚠️ Spacy model 'en_core_web_sm' not found! Installing now...")
+        subprocess.run([sys.executable, "-m", "spacy", "download", "en_core_web_sm"], check=True)
+        nlp = spacy.load("en_core_web_sm")  # Load after installation
+    return nlp
+
+# Load NLP model and embedding model
+nlp = install_spacy_model()
+embedding_model = SentenceTransformer("multi-qa-MiniLM-L6-cos-v1")
 
 # Load API Key from Streamlit Secrets
 genai.configure(api_key=st.secrets["api_key"])
-
-# Load NLP model and Embedding Model (with error handling)
-try:
-    nlp = spacy.load("en_core_web_sm")
-except OSError:
-    st.error("⚠️ Spacy model 'en_core_web_sm' not found! Installing now...")
-    os.system("python -m spacy download en_core_web_sm")
-    nlp = spacy.load("en_core_web_sm")
-
-embedding_model = SentenceTransformer("multi-qa-MiniLM-L6-cos-v1")
 
 def pdf_read(file):
     """Extracts text from an uploaded PDF file."""
