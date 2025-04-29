@@ -3,7 +3,6 @@ from PyPDF2 import PdfReader
 import faiss
 import numpy as np
 import re
-import spacy
 import google.generativeai as genai
 from sentence_transformers import SentenceTransformer
 from langchain.text_splitter import RecursiveCharacterTextSplitter
