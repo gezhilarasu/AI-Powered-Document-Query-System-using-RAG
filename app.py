@@ -15,7 +15,6 @@ load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 genai.configure(api_key=GEMINI_API_KEY)
 
-
 embedding_model = SentenceTransformer("multi-qa-MiniLM-L6-cos-v1")
 
 def pdf_read(file_path):
@@ -73,16 +72,18 @@ def generate_response(query, results):
     context = "\n".join([highlight_text(result[0], query) for result in results])
     prompt = f"### Instruction: Answer the following question based on the given context.also explain it in detail form based on that content.but the extra content should be shown separately like additional information about the query.\n\nQuestion: {query}\nContext:\n{context}\n\n### Response:"
     model = genai.GenerativeModel("gemini-1.5-pro-latest")
-    response = model.generate_content(prompt)
+    
     try:
+        response = model.generate_content(prompt)
         _result = response._result  
-        
+
         if hasattr(_result, 'candidates') and _result.candidates:
             candidate = _result.candidates[0]  
             if hasattr(candidate, 'content') and candidate.content:
                 if hasattr(candidate.content, 'parts') and candidate.content.parts:
                     return candidate.content.parts[0].text  
         return "⚠️ No valid candidates found."
+    
     except AttributeError as e:
         return f"⚠️ AttributeError: {e}"
     except Exception as e:
@@ -90,9 +91,7 @@ def generate_response(query, results):
 
 st.set_page_config(page_title="AI RAG PDF Assistant", page_icon="🔍", layout="wide")
 
-st.markdown("""
-    <h2 style="text-align: center; color: #4CAF50;">📘 AI RAG PDF Assistant</h2>
-    """, unsafe_allow_html=True)
+st.markdown("""<h2 style="text-align: center; color: #4CAF50;">📘 AI RAG PDF Assistant</h2>""", unsafe_allow_html=True)
 
 st.markdown("""
     <div style="border: 2px solid #2196F3; padding: 10px; border-radius: 10px; background-color: #f0f8ff;">
@@ -112,16 +111,22 @@ if uploaded_file is not None:
     raw_text = pdf_read(uploaded_file)
     cleaned_text = clean_text(raw_text)
     summarized_text = summarize_text(cleaned_text)
-    chunks = get_chunk(summarized_text)
     
-    if chunks:
-        chunk_embeddings = embedding_model.encode(chunks)
-        chunk_embeddings = np.array(chunk_embeddings).astype("float32")
-        dimension = chunk_embeddings.shape[1]
-        index = faiss.IndexFlatL2(dimension)
-        index.add(chunk_embeddings)
+    if summarized_text.strip():
+        chunks = get_chunk(summarized_text)
+        
+        if chunks:
+            chunk_embeddings = embedding_model.encode(chunks)
+            chunk_embeddings = np.array(chunk_embeddings).astype("float32")
+            dimension = chunk_embeddings.shape[1]
+            index = faiss.IndexFlatL2(dimension)
+            index.add(chunk_embeddings)
+        else:
+            index = None  # No chunks, no FAISS index
+            st.warning("⚠️ No chunks generated from the summarized text.")
     else:
-        index = None  # No chunks, no FAISS index
+        st.warning("⚠️ Summarized text is empty. Please check the PDF content.")
+        index = None
 
     query = st.text_input("💡 Ask a question related to the PDF:")
 
