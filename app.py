@@ -11,22 +11,10 @@ from summa import summarizer
 import os
 from dotenv import load_dotenv
 
-
-
 load_dotenv()
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 genai.configure(api_key=GEMINI_API_KEY)
-
-
-import importlib.util
-
-# Auto-download en_core_web_sm if not present
-if not importlib.util.find_spec("en_core_web_sm"):
-    from spacy.cli import download
-    download("en_core_web_sm")
-
-nlp = spacy.load("en_core_web_sm")
 
 
 embedding_model = SentenceTransformer("multi-qa-MiniLM-L6-cos-v1")
