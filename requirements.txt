@@ -1,16 +1,16 @@
+--upgrade pip
+
 # Core app dependencies
 streamlit==1.33.0
 numpy==1.24.4
 PyPDF2==3.0.1
-faiss-cpu
+faiss-cpu==1.7.4
 sentence-transformers
 python-dotenv
 langchain==0.1.14
-generativeai
 google-generativeai
 summa
 
-# spaCy and model
+# spaCy and its model
 spacy==3.7.3
 thinc==8.1.10
-en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1.tar.gz
