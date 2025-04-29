@@ -4,9 +4,6 @@ faiss-cpu
 PyPDF2
 sentence-transformers
 python-dotenv
-langchain
-generativeai
-spacy
 google-generativeai
 summa
-
+langchain
