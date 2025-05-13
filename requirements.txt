@@ -7,3 +7,8 @@ python-dotenv
 google-generativeai
 summa
 langchain
+
+
+langchain-text-splitters
+
+torch
