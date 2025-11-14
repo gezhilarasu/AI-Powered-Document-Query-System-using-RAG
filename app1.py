@@ -1,21 +1,33 @@
 import streamlit as st
 from PyPDF2 import PdfReader
-import faiss
 import numpy as np
 import re
 import google.generativeai as genai
-from sentence_transformers import SentenceTransformer
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from summa import summarizer  
 import os
 from dotenv import load_dotenv
+import torch
 
+# Load environment variables
 load_dotenv()
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 genai.configure(api_key=GEMINI_API_KEY)
 
-embedding_model = SentenceTransformer("multi-qa-MiniLM-L6-cos-v1")
+# Explicit device handling to fix Streamlit Cloud deployment issue
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# Defer the model loading to prevent immediate errors
+@st.cache_resource
+def load_embedding_model():
+    try:
+        from sentence_transformers import SentenceTransformer
+        # Explicitly set the device when loading the model
+        return SentenceTransformer("multi-qa-MiniLM-L6-cos-v1", device=device)
+    except Exception as e:
+        st.error(f"Failed to load embedding model: {str(e)}")
+        return None
 
 def pdf_read(file_path):
     """Extracts text from PDF file."""
@@ -56,13 +68,22 @@ def query_faiss_index(query, model, index, chunks, top_k=5):
     if not chunks:
         return []  # Return an empty list if no chunks exist
     
-    query_embedding = model.encode([query])
-    query_embedding = np.array(query_embedding).astype("float32")
-    distances, indices = index.search(query_embedding, top_k)
-    results = []
-    for idx, dist in zip(indices[0], distances[0]):
-        results.append((chunks[idx], dist))
-    return results
+    # Handle the case where model might be None
+    if model is None:
+        return []
+    
+    try:
+        query_embedding = model.encode([query])
+        query_embedding = np.array(query_embedding).astype("float32")
+        distances, indices = index.search(query_embedding, top_k)
+        results = []
+        for idx, dist in zip(indices[0], distances[0]):
+            if idx < len(chunks):  # Ensure the index is valid
+                results.append((chunks[idx], dist))
+        return results
+    except Exception as e:
+        st.error(f"Error in query_faiss_index: {str(e)}")
+        return []
 
 def generate_response(query, results):
     """Generates response using Gemini API."""
@@ -89,6 +110,16 @@ def generate_response(query, results):
     except Exception as e:
         return f"⚠️ An error occurred: {e}"
 
+def setup_faiss():
+    """Setup FAISS if it's not already imported"""
+    try:
+        import faiss
+        return faiss
+    except ImportError:
+        st.error("Failed to import FAISS. Make sure it's installed correctly.")
+        return None
+
+# Page configuration
 st.set_page_config(page_title="AI RAG PDF Assistant", page_icon="🔍", layout="wide")
 
 st.markdown("""<h2 style="text-align: center; color: #4CAF50;">📘 AI RAG PDF Assistant</h2>""", unsafe_allow_html=True)
@@ -103,11 +134,25 @@ st.markdown("""
     </div>
     """, unsafe_allow_html=True)
 
+# Try to load the embedding model only when needed
+embedding_model = None
+faiss_module = setup_faiss()
+
 uploaded_file = st.file_uploader("📂 Choose a PDF file ", type="pdf")
 
 if uploaded_file is not None:
     st.info("📄 Processing PDF file... Please wait.", icon="🔄")
     
+    # Load the embedding model when needed
+    if embedding_model is None:
+        embedding_model = load_embedding_model()
+        
+    # Check if embedding model was loaded successfully
+    if embedding_model is None:
+        st.error("⚠️ Could not load the embedding model. Please check your environment.")
+        st.stop()
+    
+    # Continue with PDF processing
     raw_text = pdf_read(uploaded_file)
     cleaned_text = clean_text(raw_text)
     summarized_text = summarize_text(cleaned_text)
@@ -115,24 +160,37 @@ if uploaded_file is not None:
     if summarized_text.strip():
         chunks = get_chunk(summarized_text)
         
-        if chunks:
-            chunk_embeddings = embedding_model.encode(chunks)
-            chunk_embeddings = np.array(chunk_embeddings).astype("float32")
-            dimension = chunk_embeddings.shape[1]
-            index = faiss.IndexFlatL2(dimension)
-            index.add(chunk_embeddings)
+        if chunks and faiss_module:
+            try:
+                chunk_embeddings = embedding_model.encode(chunks)
+                chunk_embeddings = np.array(chunk_embeddings).astype("float32")
+                dimension = chunk_embeddings.shape[1]
+                index = faiss_module.IndexFlatL2(dimension)
+                index.add(chunk_embeddings)
+            except Exception as e:
+                st.error(f"Error creating FAISS index: {str(e)}")
+                index = None
+                chunks = []
         else:
-            index = None  # No chunks, no FAISS index
-            st.warning("⚠️ No chunks generated from the summarized text.")
+            index = None  # No chunks or no FAISS module, no index
+            if not chunks:
+                st.warning("⚠️ No chunks generated from the summarized text.")
+            if not faiss_module:
+                st.error("⚠️ FAISS module is not available.")
     else:
         st.warning("⚠️ Summarized text is empty. Please check the PDF content.")
         index = None
+        chunks = []
 
     query = st.text_input("💡 Ask a question related to the PDF:")
 
     if query:
         st.write(f"🔍 Searching for: **{query}**")
-        results = query_faiss_index(query.lower(), embedding_model, index, chunks) if index else []
+        
+        if index is not None and chunks:
+            results = query_faiss_index(query.lower(), embedding_model, index, chunks)
+        else:
+            results = []
 
         response = generate_response(query, results)
         st.markdown(f"<div style='border: 2px solid #4CAF50; padding: 10px; border-radius: 10px; background-color: #f9f9f9;'><h4 style='color: #333;'>📝 Generated Answer:</h4><p style='font-size: 16px; color: #000;'>{response}</p></div>", unsafe_allow_html=True)
